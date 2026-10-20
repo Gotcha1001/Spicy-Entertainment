@@ -2,45 +2,71 @@
 
 import { useState } from "react";
 import { useMutation, useAction, useQuery } from "convex/react";
-
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import {
-  MIN_MS,
   dayIndexOf,
   dayShiftLabel,
-  durationOptions,
   formatDayLong,
   formatTimeRange,
   tzLabel,
 } from "@/convex/lib/schedule";
+import {
+  MAX_BLOCKS,
+  MIN_BLOCKS,
+  SLOT_MS,
+  blocksToMinutes,
+} from "@/convex/lib/slots";
+import type { EventType } from "@/convex/lib/validators";
 import { useViewerTz } from "@/hooks/useViewerTz";
-import { useMoney } from "@/hooks/useMoney";
+import { zar } from "@/lib/zar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-import { GirlCalendar } from "./GirlCalendar";
 import { AgeGateDialog } from "../AgeGateDialog";
+import { GirlCalendar } from "./GirlCalendar";
+
+const EVENT_TYPES: EventType[] = [
+  "party",
+  "braai",
+  "birthday",
+  "corporate",
+  "other",
+];
+const EVENT_LABELS: Record<EventType, string> = {
+  party: "Party",
+  braai: "Braai",
+  birthday: "Birthday",
+  corporate: "Corporate",
+  other: "Other",
+};
+
+const BLOCK_OPTIONS = Array.from(
+  { length: MAX_BLOCKS - MIN_BLOCKS + 1 },
+  (_, i) => MIN_BLOCKS + i,
+);
 
 export function BookCallPanel({
   hostId,
   hostTz,
-  hostCurrency,
-  minMinutes,
-  ratePerMinuteCents,
+  ratePerHalfHourCents,
+  canBook,
+  partyId,
 }: {
   hostId: Id<"hosts">;
   hostTz: string;
-  /** The currency her rate is set in (from her country). */
-  hostCurrency: string;
-  minMinutes: number;
-  ratePerMinuteCents: number;
+  /** Her price per 30 minutes, in ZAR cents. */
+  ratePerHalfHourCents: number;
+  /** True for party accounts only (the server enforces it as well). */
+  canBook: boolean;
+  /** Optional: attach to a party so up to 3 dancers show on one stage. */
+  partyId?: Id<"parties">;
 }) {
   const viewerTz = useViewerTz();
-  // Her rate is in her currency; show() writes it in the client's.
-  const { show } = useMoney();
-  const [minutes, setMinutes] = useState(minMinutes);
+  const [blocks, setBlocks] = useState<number>(MIN_BLOCKS);
   const [startsAt, setStartsAt] = useState<number | null>(null);
+  const [eventType, setEventType] = useState<EventType>("party");
+  const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ageOpen, setAgeOpen] = useState(false);
@@ -49,10 +75,8 @@ export function BookCallPanel({
   const createBooking = useMutation(api.bookings.createBooking);
   const initCheckout = useAction(api.payments.initCheckout);
 
-  const options = durationOptions(minMinutes, 120);
-
-  function chooseMinutes(m: number) {
-    setMinutes(m);
+  function chooseBlocks(b: number) {
+    setBlocks(b);
     setStartsAt(null); // start times change with the length, so drop the old pick
     setError(null);
   }
@@ -63,8 +87,14 @@ export function BookCallPanel({
     setBusy(true);
     setError(null);
     try {
-      const bookingId = await createBooking({ hostId, startsAt, minutes });
-      // Ask Paystack for a payment link, then send the client there
+      const bookingId = await createBooking({
+        hostId,
+        startsAt,
+        blocks,
+        eventType,
+        eventNote: note.trim() || undefined,
+        partyId,
+      });
       const url = await initCheckout({ bookingId });
       window.location.href = url;
     } catch (e) {
@@ -82,10 +112,10 @@ export function BookCallPanel({
       setAgeOpen(true);
       return;
     }
-    book();
+    void book();
   }
 
-  const endsAt = startsAt == null ? 0 : startsAt + minutes * MIN_MS;
+  const endsAt = startsAt == null ? 0 : startsAt + blocks * SLOT_MS;
   const sameZone = viewerTz === hostTz;
   const shift =
     startsAt == null || sameZone
@@ -95,18 +125,18 @@ export function BookCallPanel({
   return (
     <div className="space-y-6">
       <div>
-        <p className="mb-2 text-sm text-zinc-400">Duration</p>
+        <p className="mb-2 text-sm text-zinc-400">Show length</p>
         <div className="flex flex-wrap gap-2">
-          {options.map((m) => {
-            const isSelected = minutes === m;
+          {BLOCK_OPTIONS.map((b) => {
+            const isSelected = blocks === b;
             return (
               // Plain <button>, not the shadcn Button: its outline variant sets
               // its own border colour and can fight the themed border.
               <button
-                key={m}
+                key={b}
                 type="button"
                 aria-pressed={isSelected}
-                onClick={() => chooseMinutes(m)}
+                onClick={() => chooseBlocks(b)}
                 className={cn(
                   "accent-card rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors",
                   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400",
@@ -115,7 +145,7 @@ export function BookCallPanel({
                     : "bg-zinc-900/60 text-zinc-100 hover:bg-rose-600/20",
                 )}
               >
-                {m} min · {show(ratePerMinuteCents * m, hostCurrency)}
+                {blocksToMinutes(b)} min · {zar(ratePerHalfHourCents * b)}
               </button>
             );
           })}
@@ -125,10 +155,39 @@ export function BookCallPanel({
       <GirlCalendar
         hostId={hostId}
         hostTz={hostTz}
-        minutes={minutes}
+        blocks={blocks}
         selected={startsAt}
         onSelectSlot={setStartsAt}
       />
+
+      {startsAt != null && (
+        <div className="grid gap-3 sm:grid-cols-[12rem_1fr]">
+          <label className="text-sm">
+            <span className="mb-1 block font-medium">Event</span>
+            <select
+              value={eventType}
+              onChange={(e) => setEventType(e.target.value as EventType)}
+              className="w-full rounded-lg border border-white/15 bg-transparent px-3 py-2"
+            >
+              {EVENT_TYPES.map((t) => (
+                <option key={t} value={t} className="text-black">
+                  {EVENT_LABELS[t]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block font-medium">Note (optional)</span>
+            <input
+              value={note}
+              maxLength={200}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. 30th birthday, fancy dress theme"
+              className="w-full rounded-lg border border-white/15 bg-transparent px-3 py-2"
+            />
+          </label>
+        </div>
+      )}
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
@@ -158,14 +217,23 @@ export function BookCallPanel({
                 )}
               </p>
             )}
+            <p className="font-semibold text-white">
+              Total: {zar(ratePerHalfHourCents * blocks)}
+            </p>
           </div>
-          <Button
-            className="w-full bg-rose-600 text-white hover:bg-rose-500"
-            onClick={confirm}
-            disabled={busy}
-          >
-            {busy ? "Redirecting to payment…" : "Continue to payment"}
-          </Button>
+          {canBook ? (
+            <Button
+              className="w-full bg-rose-600 text-white hover:bg-rose-500"
+              onClick={confirm}
+              disabled={busy}
+            >
+              {busy ? "Redirecting to payment…" : "Continue to payment"}
+            </Button>
+          ) : (
+            <p className="text-sm text-neutral-400">
+              Sign in with a party account (18+) to book.
+            </p>
+          )}
         </div>
       )}
 
@@ -174,7 +242,7 @@ export function BookCallPanel({
         onOpenChange={setAgeOpen}
         onVerified={() => {
           setAgeOpen(false);
-          book(); // go straight on to payment, no second click
+          void book(); // go straight on to payment, no second click
         }}
       />
     </div>

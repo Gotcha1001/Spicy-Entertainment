@@ -28,6 +28,12 @@ export const SLOT_MS = SLOT_MINUTES * MIN_MS;
 export const MIN_BLOCKS = 1;
 export const MAX_BLOCKS = 4; // 2 hours, matches MAX_CALL_MINUTES in schedule.ts
 
+/** Every slot index in a day: 0–47. Used by the weekly-hours grid. */
+export const ALL_SLOTS: readonly number[] = Array.from(
+  { length: SLOTS_PER_DAY },
+  (_, i) => i,
+);
+
 /** Used when a dancer has never saved weekly hours: 16:00–23:00 (slots 32–45). */
 export const DEFAULT_OPEN_SLOTS: readonly number[] = Array.from(
   { length: 14 },
