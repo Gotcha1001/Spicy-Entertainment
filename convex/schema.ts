@@ -199,4 +199,21 @@ export default defineSchema({
   })
     .index("by_public_id", ["publicId"])
     .index("by_user", ["userId"]),
+
+  hostApplications: defineTable({
+    userId: v.id("users"),
+    status: v.string(), // or a validator, e.g. "pending" | "approved" | "rejected"
+    // ...the fields your apply/submit mutation writes...
+    idPhotoPublicId: v.optional(v.string()),
+    selfiePublicId: v.optional(v.string()),
+    idDocumentsUploaded: v.optional(v.boolean()),
+    createdAt: v.number(),
+  }).index("by_user", ["userId"]),
+
+  // ───────────── FX RATES (refreshed by cron, base USD) ─────────────
+  fxRates: defineTable({
+    base: v.string(), // always "USD"
+    rates: v.record(v.string(), v.number()), // e.g. { ZAR: 18.2, EUR: 0.92 }
+    updatedAt: v.number(),
+  }),
 });

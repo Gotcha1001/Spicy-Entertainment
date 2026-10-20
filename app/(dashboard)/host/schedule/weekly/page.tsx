@@ -1,10 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { formatHour, WEEKDAY_LONG } from "@/convex/lib/schedule";
-import { ALL_HOURS } from "@/convex/lib/slots";
+import { WEEKDAY_LONG } from "@/convex/lib/schedule";
+import { ALL_SLOTS, DEFAULT_OPEN_SLOTS, formatSlot } from "@/convex/lib/slots";
 import { useZonedClock } from "@/hooks/useZonedClock";
 import { useViewerTz } from "@/hooks/useViewerTz";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ export default function WeeklyHoursPage() {
   // Hooks stay above the early returns.
   const hostTz = useViewerTz();
   const { timeLabel, label } = useZonedClock(hostTz);
+  const [error, setError] = useState<string | null>(null);
 
   const weekly = useQuery(api.calendar.getMyWeeklyHours);
   const setWeekly = useMutation(api.calendar.setWeeklyHours);
@@ -25,18 +27,26 @@ export default function WeeklyHoursPage() {
     return <p className="p-4 text-zinc-400">Host profile required.</p>;
   }
 
+  // `slot` is a half-hour index, 0–47 (0 = 00:00, 1 = 00:30 … 47 = 23:30).
+  // `current` is null until she has saved once; the grid then shows the
+  // defaults, so toggling must start from the same defaults.
   async function toggle(
     weekday: number,
-    hour: number,
+    slot: number,
     current: number[] | null,
   ) {
-    const set = new Set(current ?? []);
-    if (set.has(hour)) set.delete(hour);
-    else set.add(hour);
-    await setWeekly({
-      weekday,
-      hours: [...set].sort((a, b) => a - b),
-    });
+    setError(null);
+    const set = new Set<number>(current ?? DEFAULT_OPEN_SLOTS);
+    if (set.has(slot)) set.delete(slot);
+    else set.add(slot);
+    try {
+      await setWeekly({
+        weekday,
+        slots: [...set].sort((a, b) => a - b),
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save");
+    }
   }
 
   return (
@@ -55,31 +65,33 @@ export default function WeeklyHoursPage() {
           <span className="font-mono font-semibold">{timeLabel}</span>
         </p>
         <p className="text-sm text-zinc-400">
-          These are your default open hours. One-day overrides on the day
-          calendar take priority.
+          Each box is a 30-minute slot. These are your default open hours.
+          One-day overrides on the day calendar take priority.
         </p>
+        {error && <p className="text-sm text-red-400">{error}</p>}
       </div>
 
-      {weekly.map(({ weekday, hours }) => {
-        const open = new Set(hours ?? []);
+      {weekly.map(({ weekday, slots }) => {
+        const open = new Set<number>(slots ?? DEFAULT_OPEN_SLOTS);
         return (
           <section key={weekday} className="space-y-2">
             <h2 className="text-sm font-medium text-zinc-300">
               {WEEKDAY_LONG[weekday]}
-              {hours === null && (
+              {slots === null && (
                 <span className="ml-2 text-xs text-zinc-500">
-                  (defaults 09:00–21:00 until you save)
+                  (defaults 16:00–23:00 until you save)
                 </span>
               )}
             </h2>
             <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-6 md:grid-cols-8">
-              {ALL_HOURS.map((h) => {
-                const on = open.has(h);
+              {ALL_SLOTS.map((s) => {
+                const on = open.has(s);
                 return (
                   <button
-                    key={h}
+                    key={s}
                     type="button"
-                    onClick={() => toggle(weekday, h, hours)}
+                    aria-pressed={on}
+                    onClick={() => toggle(weekday, s, slots)}
                     className={cn(
                       "rounded-md border px-1 py-2 text-center font-mono text-xs transition",
                       on
@@ -87,7 +99,7 @@ export default function WeeklyHoursPage() {
                         : "border-zinc-800 bg-zinc-900/50 text-zinc-500",
                     )}
                   >
-                    {formatHour(h)}
+                    {formatSlot(s)}
                   </button>
                 );
               })}

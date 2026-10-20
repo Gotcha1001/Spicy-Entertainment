@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as ageVerification from "../ageVerification.js";
 import type * as assets from "../assets.js";
 import type * as bookings from "../bookings.js";
 import type * as calendar from "../calendar.js";
@@ -33,7 +34,6 @@ import type * as lib_validators from "../lib/validators.js";
 import type * as notifications from "../notifications.js";
 import type * as payments from "../payments.js";
 import type * as payouts from "../payouts.js";
-import type * as profiles from "../profiles.js";
 import type * as reviews from "../reviews.js";
 import type * as roles from "../roles.js";
 import type * as safety from "../safety.js";
@@ -47,6 +47,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  ageVerification: typeof ageVerification;
   assets: typeof assets;
   bookings: typeof bookings;
   calendar: typeof calendar;
@@ -72,7 +73,6 @@ declare const fullApi: ApiFromModules<{
   notifications: typeof notifications;
   payments: typeof payments;
   payouts: typeof payouts;
-  profiles: typeof profiles;
   reviews: typeof reviews;
   roles: typeof roles;
   safety: typeof safety;
