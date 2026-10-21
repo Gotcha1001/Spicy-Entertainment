@@ -26,6 +26,7 @@ import type * as lib_fees from "../lib/fees.js";
 import type * as lib_fxRates from "../lib/fxRates.js";
 import type * as lib_geo from "../lib/geo.js";
 import type * as lib_hostRules from "../lib/hostRules.js";
+import type * as lib_locale from "../lib/locale.js";
 import type * as lib_schedule from "../lib/schedule.js";
 import type * as lib_showWindow from "../lib/showWindow.js";
 import type * as lib_slots from "../lib/slots.js";
@@ -65,6 +66,7 @@ declare const fullApi: ApiFromModules<{
   "lib/fxRates": typeof lib_fxRates;
   "lib/geo": typeof lib_geo;
   "lib/hostRules": typeof lib_hostRules;
+  "lib/locale": typeof lib_locale;
   "lib/schedule": typeof lib_schedule;
   "lib/showWindow": typeof lib_showWindow;
   "lib/slots": typeof lib_slots;

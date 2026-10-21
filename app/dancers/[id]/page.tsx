@@ -1,25 +1,32 @@
-// app/dancers/[id]/page.tsx  (replaces hosts/[id]: no gifts, no secret photos)
+// app/dancers/[id]/page.tsx
 "use client";
+
 import { useParams } from "next/navigation";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import type { Id } from "@/convex/_generated/dataModel";
 
 import { OnlineBadge } from "@/components/dancers/OnlineBadge";
 import { RatingBadge } from "@/components/dancers/RatingBadge";
 import { HalfHourSlotPicker } from "@/components/booking/HalfHourSlotPicker";
-import { zar } from "@/lib/zar";
 import { ActChips } from "@/components/dancers/ArtChips";
+import { useMoney } from "@/hooks/useMoney";
+
 export default function Page() {
   const { id } = useParams<{ id: string }>();
   const d = useQuery(api.hosts.getPublic, { hostId: id });
   const me = useQuery(api.user.getMe);
+  const { show, ready } = useMoney();
+
   if (d === undefined) return <p className="p-8">Loading…</p>;
   if (d === null) return <p className="p-8">Dancer not found.</p>;
+
+  const hostCurrency = d.currency ?? "ZAR";
+
   return (
     <main className="mx-auto max-w-5xl space-y-8 p-6">
       <section className="grid gap-6 md:grid-cols-[18rem_1fr]">
         {d.imageUrl && (
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={d.imageUrl}
             alt={d.displayName}
@@ -34,7 +41,9 @@ export default function Page() {
           <ActChips acts={d.acts} />
           <p className="text-neutral-300">{d.bio}</p>
           <p className="font-semibold">
-            {zar(d.ratePerHalfHourCents)} / 30 min
+            {ready
+              ? `${show(d.ratePerHalfHourCents, hostCurrency)} / 30 min`
+              : "…"}
           </p>
         </div>
       </section>
@@ -42,6 +51,7 @@ export default function Page() {
         hostId={d._id}
         hostTz={d.timezone}
         hostName={d.displayName}
+        hostCurrency={hostCurrency}
         canBook={me?.role === "user" && me.onboardingChoice === "party"}
       />
     </main>

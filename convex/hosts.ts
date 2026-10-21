@@ -4,6 +4,7 @@ import {
   mutation,
   query,
   type MutationCtx,
+  type QueryCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -18,6 +19,14 @@ import {
   isBookable,
 } from "./lib/hostRules";
 import { actValidator, type Act, type HostStatus } from "./lib/validators";
+import {
+  formatMoney,
+  limitsFor,
+  resolveCurrency,
+  withinLimits,
+  type Rates,
+} from "./lib/currency";
+import { FALLBACK_RATES } from "./lib/currency";
 
 // ───────────── Types returned to the browser (never the subaccount code) ─────────────
 
@@ -27,7 +36,10 @@ export type DancerCard = {
   tagline: string;
   acts: Act[];
   imageUrl: string | null;
+  /** Price for ONE 30-minute block, in minor units of `currency`. */
   ratePerHalfHourCents: number;
+  /** ISO 4217 of ratePerHalfHourCents. Missing on old rows → treat as "ZAR". */
+  currency: string;
   city: string | null;
   timezone: string;
   isOnline: boolean;
@@ -61,6 +73,7 @@ function toCard(h: Doc<"hosts">): DancerCard {
     acts: h.acts,
     imageUrl: h.imageUrl ?? null,
     ratePerHalfHourCents: h.ratePerHalfHourCents,
+    currency: h.currency ?? "ZAR",
     city: h.city ?? null,
     timezone: h.timezone,
     isOnline: h.isOnline,
@@ -81,10 +94,22 @@ async function syncOnboarded(
   if (ready !== host.isOnboarded) {
     await ctx.db.patch(hostId, {
       isOnboarded: ready,
-      // Not ready any more => make sure she can't show as online.
       ...(ready ? {} : { isOnline: false }),
     });
   }
+}
+
+async function loadRates(ctx: QueryCtx | MutationCtx): Promise<Rates> {
+  // Prefer live FX table if you have one; otherwise fallback.
+  try {
+    const row = await ctx.db.query("fxRates").order("desc").first();
+    if (row?.rates && typeof row.rates === "object") {
+      return { ...FALLBACK_RATES, ...(row.rates as Rates) };
+    }
+  } catch {
+    /* table may not exist in older deploys */
+  }
+  return FALLBACK_RATES;
 }
 
 // ───────────── Own profile ─────────────
@@ -124,7 +149,7 @@ export const saveProfile = mutation({
     city: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Id<"hosts">> => {
-    const user = await requireAdult(ctx); // 18+ and house rules accepted
+    const user = await requireAdult(ctx);
 
     if (user.role === "user" && user.onboardingChoice !== "dancer") {
       throw new Error("Choose “I’m a dancer” first");
@@ -133,6 +158,10 @@ export const saveProfile = mutation({
     if (!timezone || !isValidTimeZone(timezone)) {
       throw new Error("Choose your time zone first");
     }
+
+    const rates = await loadRates(ctx);
+    // Rate is always stored in HER chosen currency (from locale onboarding).
+    const currency = resolveCurrency(user, rates);
 
     const displayName = args.displayName.trim();
     const tagline = args.tagline.trim();
@@ -150,13 +179,14 @@ export const saveProfile = mutation({
       throw new Error("City must be 60 characters or fewer");
     if (acts.length < 1 || acts.length > MAX_ACTS)
       throw new Error(`Pick 1 to ${MAX_ACTS} things you’re good at`);
+
+    const limits = limitsFor(MIN_RATE_CENTS, MAX_RATE_CENTS, currency, rates);
     if (
       !Number.isInteger(args.ratePerHalfHourCents) ||
-      args.ratePerHalfHourCents < MIN_RATE_CENTS ||
-      args.ratePerHalfHourCents > MAX_RATE_CENTS
+      !withinLimits(args.ratePerHalfHourCents, limits)
     ) {
       throw new Error(
-        `Price per 30 minutes must be between R${MIN_RATE_CENTS / 100} and R${MAX_RATE_CENTS / 100}`,
+        `Price per 30 minutes must be between ${formatMoney(limits.min, currency)} and ${formatMoney(limits.max, currency)}`,
       );
     }
 
@@ -173,6 +203,7 @@ export const saveProfile = mutation({
         acts,
         city,
         ratePerHalfHourCents: args.ratePerHalfHourCents,
+        currency,
         timezone,
       });
       return existing._id;
@@ -186,9 +217,10 @@ export const saveProfile = mutation({
       acts,
       city,
       ratePerHalfHourCents: args.ratePerHalfHourCents,
+      currency,
       timezone,
       status: "active",
-      isOnboarded: false, // flips true once image + payout exist
+      isOnboarded: false,
       payoutProvider: "paystack",
       isOnline: false,
       lastSeenAt: Date.now(),
@@ -217,7 +249,6 @@ export const setImage = mutation({
     if (!imageUrl.startsWith("https://res.cloudinary.com/")) {
       throw new Error("Invalid image URL");
     }
-    // The upload action records ownership; make sure this image is hers.
     const asset = await ctx.db
       .query("uploadedAssets")
       .withIndex("by_public_id", (q) => q.eq("publicId", imagePublicId))
@@ -251,15 +282,11 @@ export const setPaused = mutation({
 
 // ───────────── Presence ("active now") ─────────────
 
-/**
- * Called every ~60s by the heartbeat hook, but ONLY while the dancer has her
- * "I'm available" toggle on. Marks her online and keeps lastSeenAt fresh.
- */
 export const touchPresence = mutation({
   args: {},
   handler: async (ctx): Promise<null> => {
     const { host } = await requireHost(ctx);
-    if (!isBookable(host)) return null; // paused / suspended / incomplete: never "online"
+    if (!isBookable(host)) return null;
 
     const now = Date.now();
     if (host.isOnline && now - host.lastSeenAt < PRESENCE_THROTTLE_MS)
@@ -269,7 +296,6 @@ export const touchPresence = mutation({
   },
 });
 
-/** She switched "I'm available" off (or closed the tab cleanly). */
 export const setOffline = mutation({
   args: {},
   handler: async (ctx): Promise<null> => {
@@ -279,7 +305,6 @@ export const setOffline = mutation({
   },
 });
 
-/** Cron: dancers whose heartbeat stopped (closed laptop, lost signal) go offline. */
 export const markStaleOffline = internalMutation({
   args: {},
   handler: async (ctx): Promise<number> => {
@@ -303,10 +328,6 @@ export const markStaleOffline = internalMutation({
 
 // ───────────── Public: dashboard + profile ─────────────
 
-/**
- * The dashboard: every bookable dancer, ACTIVE-NOW first, optionally filtered
- * by one act (e.g. only fire performers).
- */
 export const listActive = query({
   args: { act: v.optional(actValidator) },
   handler: async (ctx, { act }): Promise<DancerCard[]> => {
@@ -332,7 +353,6 @@ export const listActive = query({
 });
 
 export const getPublic = query({
-  // string, not v.id: a malformed ID in the URL should show "not found", not crash the page
   args: { hostId: v.string() },
   handler: async (ctx, { hostId: rawId }): Promise<DancerPublic | null> => {
     const hostId = ctx.db.normalizeId("hosts", rawId);

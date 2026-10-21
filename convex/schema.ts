@@ -12,7 +12,7 @@ import {
 } from "./lib/validators";
 
 export default defineSchema({
-  // ───────────── USERS (extends the starter's users table) ─────────────
+  // ───────────── USERS ─────────────
   users: defineTable({
     clerkId: v.string(),
     email: v.string(),
@@ -25,7 +25,15 @@ export default defineSchema({
     ageConfirmedAt: v.optional(v.number()),
     /** Set when they accept the "no nudity / no porn" house rules. */
     rulesAcceptedAt: v.optional(v.number()),
-    timezone: v.optional(v.string()), // IANA, e.g. "Africa/Johannesburg"
+    /**
+     * ISO 3166 country code, e.g. "ZA", "US", "GB".
+     * Drives display currency via currencyForCountry() in lib/currency.ts.
+     * Missing → treated as LEGACY_COUNTRY ("ZA") → ZAR.
+     */
+    country: v.optional(v.string()),
+    currency: v.optional(v.string()),
+    /** IANA zone, e.g. "Africa/Johannesburg". Used for schedule + receipts. */
+    timezone: v.optional(v.string()),
     appearance: v.optional(
       v.object({
         accent: v.string(),
@@ -50,15 +58,16 @@ export default defineSchema({
     /** Cloudinary profile image. */
     imageUrl: v.optional(v.string()),
     imagePublicId: v.optional(v.string()),
-    /** Price for ONE 30-minute block, in ZAR cents. */
+    /** Price for ONE 30-minute block, in ZAR cents (CHARGE_CURRENCY). */
     ratePerHalfHourCents: v.number(),
+    /** Currency `ratePerHalfHourCents` is written in. Missing → "ZAR" (old rows). */
+    currency: v.optional(v.string()),
     city: v.optional(v.string()), // service area label shown on the card
     timezone: v.string(),
     status: hostStatusValidator,
     isOnboarded: v.boolean(),
     wantsOnline: v.optional(v.boolean()),
-    // Payout (Paystack subaccount). She enters her own bank details, so we
-    // never pay her manually.
+    // Payout (Paystack subaccount). She enters her own bank details.
     payoutProvider: v.literal("paystack"),
     payoutAccountRef: v.optional(v.string()), // Paystack subaccount code
     bankName: v.optional(v.string()),
@@ -110,13 +119,14 @@ export default defineSchema({
     startsAt: v.number(),
     endsAt: v.number(),
     minutes: v.number(), // always a multiple of 30
+    /** Always ZAR cents (same as payments / host rates). */
     amountCents: v.number(),
     platformFeeCents: v.number(),
     hostShareCents: v.number(),
     status: bookingStatusValidator,
     paymentId: v.optional(v.id("payments")),
     roomName: v.optional(v.string()),
-    /** Stamped by the livekit-token route when the dancer first joins. Drives no-show refunds. */
+    /** Stamped when the dancer first joins. Drives no-show refunds. */
     hostJoinedAt: v.optional(v.number()),
     hostTimezone: v.string(), // snapshots for receipts / disputes
     guestTimezone: v.optional(v.string()),
@@ -128,7 +138,7 @@ export default defineSchema({
     .index("by_party", ["partyId"])
     .index("by_status_start", ["status", "startsAt"]), // cron: expire unpaid, detect no-shows
 
-  // ───────────── PAYMENTS (Paystack) ─────────────
+  // ───────────── PAYMENTS (Paystack — always ZAR) ─────────────
   payments: defineTable({
     bookingId: v.id("bookings"),
     payerId: v.id("users"),
@@ -146,7 +156,7 @@ export default defineSchema({
     .index("by_booking", ["bookingId"])
     .index("by_payer", ["payerId"]),
 
-  // ───────────── LIVE SESSIONS (one-way LiveKit room per paid booking) ─────────────
+  // ───────────── LIVE SESSIONS (LiveKit room per paid booking) ─────────────
   callSessions: defineTable({
     requesterId: v.id("users"), // the party (viewer)
     recipientId: v.id("users"), // the dancer's user (publisher)
@@ -175,7 +185,7 @@ export default defineSchema({
     .index("by_booking", ["bookingId"])
     .index("by_host", ["hostId"]),
 
-  // ───────────── SAFETY (no admin: dancers block, anyone reports) ─────────────
+  // ───────────── SAFETY ─────────────
   blocks: defineTable({
     hostId: v.id("hosts"),
     blockedUserId: v.id("users"),
@@ -191,7 +201,7 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_target_resolved", ["targetUserId", "resolved"]),
 
-  // ───────────── CLOUDINARY OWNERSHIP (used by uploads.ts / assets.ts) ─────────────
+  // ───────────── CLOUDINARY OWNERSHIP ─────────────
   uploadedAssets: defineTable({
     userId: v.id("users"),
     publicId: v.string(),
@@ -202,18 +212,18 @@ export default defineSchema({
 
   hostApplications: defineTable({
     userId: v.id("users"),
-    status: v.string(), // or a validator, e.g. "pending" | "approved" | "rejected"
-    // ...the fields your apply/submit mutation writes...
+    status: v.string(), // prefer a validator: "pending" | "approved" | "rejected"
     idPhotoPublicId: v.optional(v.string()),
     selfiePublicId: v.optional(v.string()),
     idDocumentsUploaded: v.optional(v.boolean()),
     createdAt: v.number(),
   }).index("by_user", ["userId"]),
 
-  // ───────────── FX RATES (refreshed by cron, base USD) ─────────────
+  // ───────────── FX RATES (cron refresh, base USD) ─────────────
+  // Used only for *display* conversion. Charges and storage stay ZAR.
   fxRates: defineTable({
     base: v.string(), // always "USD"
-    rates: v.record(v.string(), v.number()), // e.g. { ZAR: 18.2, EUR: 0.92 }
+    rates: v.record(v.string(), v.number()), // e.g. { ZAR: 18.2, EUR: 0.92, USD: 1 }
     updatedAt: v.number(),
   }),
 });

@@ -16,7 +16,6 @@ export default function ChooseRolePage(): React.JSX.Element {
   const router = useRouter();
   const status = useQuery(api.user.getOnboardingStatus);
   const chooseAccountType = useMutation(api.user.chooseAccountType);
-  // The NEW mutation: sets BOTH ageConfirmedAt and rulesAcceptedAt.
   const confirmAdult = useMutation(api.user.confirmAdult);
 
   const [locale, setLocale] = useState<Locale | null>(null);
@@ -25,8 +24,6 @@ export default function ChooseRolePage(): React.JSX.Element {
   const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Needs BOTH flags. An account with only ageConfirmedAt (made by the old
-  // mutation) sees the 18+ step again and gets rulesAcceptedAt set.
   const alreadyAdult =
     status?.ageConfirmed === true && status?.rulesAccepted === true;
   const today = new Date().toISOString().slice(0, 10);
@@ -40,16 +37,16 @@ export default function ChooseRolePage(): React.JSX.Element {
     }
     setBusy(true);
     try {
-      // Server checks the date of birth, stores only timestamps, and records
-      // that the house rules were accepted. Both roles need this.
-      // acceptRules is only ever true here: the button is blocked above
-      // until the person has ticked the box.
       if (!alreadyAdult) {
         await confirmAdult({ dateOfBirth: dob, acceptRules: true });
       }
-      await chooseAccountType({ choice, timezone: locale.timezone });
-      // TODO: make sure "/dancers" is your real party home (the route guard
-      // uses "/hosts"). Both must be the same page.
+      await chooseAccountType({
+        choice,
+        country: locale.country,
+        timezone: locale.timezone,
+        currency: locale.currency,
+      });
+      // Align with sidebar/route guard: party home is /dancers (or /hosts if that's your real path)
       router.push(choice === "party" ? "/dancers" : "/host/onboarding");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
@@ -57,7 +54,6 @@ export default function ChooseRolePage(): React.JSX.Element {
     }
   }
 
-  // A dancer with a saved profile can't switch type any more.
   if (status?.role === "host") {
     return (
       <main className="mx-auto max-w-2xl space-y-4 p-6">
@@ -91,7 +87,8 @@ export default function ChooseRolePage(): React.JSX.Element {
       <section className="space-y-2 rounded-2xl border border-white/10 bg-white/5 p-5">
         <h2 className="text-lg font-semibold">Where are you?</h2>
         <p className="text-sm text-neutral-400">
-          We use this to show show times in the right time zone.
+          We use this to show show times in the right time zone and prices in
+          your currency.
         </p>
         <LocalePicker onChange={setLocale} />
       </section>

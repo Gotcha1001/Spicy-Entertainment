@@ -51,6 +51,8 @@ import {
   type EventType,
 } from "./lib/validators";
 import type { CheckoutInfo } from "./payments";
+import { CHARGE_CURRENCY, convertMinor } from "./lib/currency";
+import { loadRates } from "./lib/locale";
 
 const PENDING_EXPIRY_MS = 15 * MIN_MS; // unpaid holds are released after this
 const CANCEL_CUTOFF_MS = 24 * 60 * MIN_MS; // parties can cancel (and be refunded) up to 24h before
@@ -197,7 +199,14 @@ export const createBooking = mutation({
     }
 
     // Price is ALWAYS computed here from her rate, never from the browser.
-    const amountCents = host.ratePerHalfHourCents * blocks;
+    // The rate is in her currency; the payment gateway still charges CHARGE_CURRENCY.
+    const rates = await loadRates(ctx);
+    const amountCents = convertMinor(
+      host.ratePerHalfHourCents * blocks,
+      host.currency ?? "ZAR",
+      CHARGE_CURRENCY,
+      rates,
+    );
     const fees = split(amountCents);
 
     const bookingId = await ctx.db.insert("bookings", {

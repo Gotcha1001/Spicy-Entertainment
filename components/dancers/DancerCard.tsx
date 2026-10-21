@@ -1,13 +1,16 @@
 "use client";
+
 import Link from "next/link";
 import type { DancerCard as Dancer } from "@/convex/hosts";
-import { zar } from "@/lib/zar";
-
+import { useMoney } from "@/hooks/useMoney";
 import { OnlineBadge } from "./OnlineBadge";
 import { RatingBadge } from "./RatingBadge";
 import { ActChips } from "./ArtChips";
 
 export function DancerCard({ dancer }: { dancer: Dancer }): React.JSX.Element {
+  const { show, ready } = useMoney();
+  const hostCurrency = dancer.currency ?? "ZAR";
+
   return (
     <Link
       href={`/dancers/${dancer._id}`}
@@ -37,7 +40,9 @@ export function DancerCard({ dancer }: { dancer: Dancer }): React.JSX.Element {
         </p>
         <ActChips acts={dancer.acts} max={3} />
         <p className="text-sm">
-          <strong>{zar(dancer.ratePerHalfHourCents)}</strong>
+          <strong>
+            {ready ? show(dancer.ratePerHalfHourCents, hostCurrency) : "…"}
+          </strong>
           <span className="text-neutral-400"> / 30 min</span>
           {dancer.city && (
             <span className="text-neutral-500"> · {dancer.city}</span>
