@@ -3,6 +3,19 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAction, useMutation, useQuery } from "convex/react";
+import {
+  CHARGE_CURRENCY,
+  convertMinor,
+  currencySymbol,
+  formatMoney,
+  fromMinor,
+  limitsFor,
+  minorDigits,
+  niceMinor,
+  resolveCurrency,
+  toMinor,
+  withinLimits,
+} from "@/convex/lib/currency";
 
 import { api } from "@/convex/_generated/api";
 import {
@@ -22,11 +35,6 @@ const log = (...args: unknown[]) => {
 // sets her time zone. Change this to your real route.
 const USER_ONBOARDING_PATH = "/onboarding";
 
-const DEFAULT_RATE_CENTS = Math.min(
-  MAX_RATE_CENTS,
-  Math.max(MIN_RATE_CENTS, 30000),
-);
-
 // Act options come straight from the validator so they can never drift.
 const ACT_OPTIONS: Act[] = (
   actValidator as unknown as { members: Array<{ value?: string }> }
@@ -41,9 +49,6 @@ const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "Something went wrong";
 }
-
-const zar = (cents: number) =>
-  `R${(cents / 100).toFixed(cents % 100 === 0 ? 0 : 2)}`;
 
 /** Resize to max 1024px and re-encode as JPEG, so uploads stay small. */
 async function fileToJpegDataUri(
@@ -93,7 +98,8 @@ export default function HostOnboarding() {
   const [bio, setBio] = useState("");
   const [city, setCity] = useState("");
   const [acts, setActs] = useState<Act[]>([]);
-  const [rateRand, setRateRand] = useState(""); // rand per 30 minutes
+  /** Rate in major units of the dancer's currency (e.g. "15.50" for USD). */
+  const [rateInput, setRateInput] = useState("");
   const [bankCode, setBankCode] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [accountNumberConfirm, setAccountNumberConfirm] = useState("");
@@ -105,26 +111,39 @@ export default function HostOnboarding() {
   const fileRef = useRef<HTMLInputElement>(null);
   const prefilled = useRef(false);
 
+  const fx = useQuery(api.fx.getRates);
+  const rates = fx?.rates;
+  const currency = resolveCurrency(me, rates);
+  const limits = rates
+    ? limitsFor(MIN_RATE_CENTS, MAX_RATE_CENTS, currency, rates)
+    : null;
+
   // Fill the form once: from her saved profile if she has one, otherwise
   // defaults. Runs once, so it never overwrites her typing.
   useEffect(() => {
-    if (prefilled.current || host === undefined || me === undefined) return;
+    if (prefilled.current || host === undefined || me === undefined || !rates)
+      return;
     if (host) {
-      log("prefilling from saved host profile");
       setDisplayName(host.displayName);
       setTagline(host.tagline);
       setBio(host.bio);
       setCity(host.city ?? "");
       setActs(host.acts);
-      setRateRand((host.ratePerHalfHourCents / 100).toString());
+      // Prefer the currency stored on the host row; fall back to her user currency.
+      setRateInput(
+        fromMinor(host.ratePerHalfHourCents, host.currency ?? currency),
+      );
     } else {
-      log("no host yet, prefilling defaults");
-      // First name only: her full legal name must not become her public name.
       setDisplayName(me?.name?.trim().split(/\s+/)[0] ?? "");
-      setRateRand((DEFAULT_RATE_CENTS / 100).toString());
+      // Default: R300 per 30 min, converted into her currency.
+      const def = niceMinor(
+        convertMinor(30_000, CHARGE_CURRENCY, currency, rates),
+        currency,
+      );
+      setRateInput(fromMinor(def, currency));
     }
     prefilled.current = true;
-  }, [host, me]);
+  }, [host, me, rates, currency]);
 
   // Log the raw query results whenever they change.
   // undefined = still loading, null = signed out / no row.
@@ -137,8 +156,13 @@ export default function HostOnboarding() {
   // didn't have the shape this page expects.
   useEffect(() => {
     log("ACT_OPTIONS:", ACT_OPTIONS, "MAX_ACTS:", MAX_ACTS);
-    log("rate limits (cents):", MIN_RATE_CENTS, MAX_RATE_CENTS);
-  }, []);
+    log(
+      "rate limits (cents, charge currency):",
+      MIN_RATE_CENTS,
+      MAX_RATE_CENTS,
+    );
+    log("resolved currency:", currency, "limits:", limits);
+  }, [currency, limits]);
 
   // Load banks once a profile exists and payouts aren't set up yet
   const payoutReady = host?.payoutReady ?? false;
@@ -158,7 +182,7 @@ export default function HostOnboarding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host?._id, payoutReady]);
 
-  if (host === undefined || me === undefined) {
+  if (host === undefined || me === undefined || rates === undefined) {
     return <p className="p-8">Loading…</p>;
   }
 
@@ -179,14 +203,18 @@ export default function HostOnboarding() {
     missing,
     canSave,
     busy,
-    saveDisabled: busy || !canSave,
+    saveDisabled: busy || !canSave || !limits,
     photoDisabled: busy || !host,
+    currency,
+    limits,
     me: {
       ageConfirmedAt: me?.ageConfirmedAt,
       rulesAcceptedAt: me?.rulesAcceptedAt,
       onboardingChoice: me?.onboardingChoice,
       role: me?.role,
       timezone: me?.timezone,
+      currency: me?.currency,
+      country: me?.country,
     },
   });
 
@@ -202,19 +230,29 @@ export default function HostOnboarding() {
 
   async function onSaveProfile(e: React.FormEvent) {
     e.preventDefault();
-    log("save clicked", { displayName, tagline, bio, city, acts, rateRand });
+    log("save clicked", {
+      displayName,
+      tagline,
+      bio,
+      city,
+      acts,
+      rateInput,
+      currency,
+    });
     setError("");
     setDone("");
 
-    const cents = Math.round(parseFloat(rateRand) * 100);
-    if (
-      !Number.isFinite(cents) ||
-      cents < MIN_RATE_CENTS ||
-      cents > MAX_RATE_CENTS
-    ) {
-      log("blocked: rate out of range", cents);
+    if (!limits) {
+      setError("Exchange rates are still loading. Try again in a moment.");
+      return;
+    }
+
+    // Convert the typed major amount into minor units of HER currency.
+    const cents = toMinor(rateInput, currency);
+    if (!Number.isFinite(cents) || !withinLimits(cents, limits)) {
+      log("blocked: rate out of range", { cents, limits, currency });
       setError(
-        `Your rate must be between ${zar(MIN_RATE_CENTS)} and ${zar(MAX_RATE_CENTS)} per 30 minutes.`,
+        `Your rate must be between ${formatMoney(limits.min, currency)} and ${formatMoney(limits.max, currency)} per 30 minutes.`,
       );
       return;
     }
@@ -361,6 +399,15 @@ export default function HostOnboarding() {
 
   const banner = statusBanner();
 
+  // Safe for the rate input: limits is non-null after the early return above
+  // only when rates loaded; still guard for TS and edge cases.
+  const rateMinMajor = limits
+    ? limits.min / 10 ** minorDigits(currency)
+    : undefined;
+  const rateMaxMajor = limits
+    ? limits.max / 10 ** minorDigits(currency)
+    : undefined;
+
   return (
     <main className="mx-auto max-w-xl space-y-8 px-4 py-10 text-white">
       <header>
@@ -500,28 +547,39 @@ export default function HostOnboarding() {
 
         <label className="block">
           <span className="mb-1 block text-sm font-medium">
-            Your rate (ZAR per 30 minutes)
+            Your rate ({currency} per 30 minutes)
           </span>
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-rose-300">R</span>
+            <span className="font-semibold text-rose-300">
+              {currencySymbol(currency)}
+            </span>
             <input
               className={field}
               type="number"
-              min={MIN_RATE_CENTS / 100}
-              max={MAX_RATE_CENTS / 100}
-              step={1}
-              value={rateRand}
-              onChange={(e) => setRateRand(e.target.value)}
+              min={rateMinMajor}
+              max={rateMaxMajor}
+              step={minorDigits(currency) === 0 ? 1 : "any"}
+              value={rateInput}
+              onChange={(e) => setRateInput(e.target.value)}
               required
+              disabled={!limits}
             />
           </div>
           <span className="mt-1 block text-xs text-neutral-500">
-            Allowed: {zar(MIN_RATE_CENTS)} to {zar(MAX_RATE_CENTS)} per
-            30-minute block. A 1-hour booking costs double.
+            {limits ? (
+              <>
+                Allowed: {formatMoney(limits.min, currency)} to{" "}
+                {formatMoney(limits.max, currency)} per 30-minute block. A
+                1-hour booking costs double. Clients see this converted into
+                their own currency. To change your currency, go to Settings.
+              </>
+            ) : (
+              <>Loading exchange rates…</>
+            )}
           </span>
         </label>
 
-        <button className={button} disabled={busy || !canSave}>
+        <button className={button} disabled={busy || !canSave || !limits}>
           Save profile
         </button>
       </form>

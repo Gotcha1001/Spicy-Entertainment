@@ -1,4 +1,5 @@
 "use client";
+
 // The booking panel on /dancers/[id]: pick a day, how many 30-min blocks (1-4),
 // a start time, event type -> creates the booking -> Paystack checkout.
 import { useState } from "react";
@@ -16,8 +17,8 @@ import {
 import type { EventType } from "@/convex/lib/validators";
 import { useSlotPicker } from "@/hooks/useSlotPicker";
 import { useViewerTz } from "@/hooks/useViewerTz";
+import { useMoney } from "@/hooks/useMoney";
 import { cn } from "@/lib/utils";
-import { zar } from "@/lib/zar";
 
 const EVENT_TYPES: EventType[] = [
   "party",
@@ -39,12 +40,18 @@ export function HalfHourSlotPicker({
   hostId,
   hostTz,
   hostName,
+  hostCurrency = "ZAR",
   canBook,
   partyId,
 }: {
   hostId: Id<"hosts">;
   hostTz: string;
   hostName: string;
+  /**
+   * Currency the dancer's rate is stored in (hosts.currency).
+   * totalCents from useSlotPicker is in this currency; we convert for display.
+   */
+  hostCurrency?: string;
   /** True for party accounts only (server enforces it as well). */
   canBook: boolean;
   /** Optional: attach to a party so up to 3 dancers show on one stage. */
@@ -52,6 +59,7 @@ export function HalfHourSlotPicker({
 }): React.JSX.Element {
   const p = useSlotPicker(hostId, hostTz);
   const viewerTz = useViewerTz();
+  const { show, ready } = useMoney();
   const createBooking = useMutation(api.bookings.createBooking);
   const initCheckout = useAction(api.payments.initCheckout);
   const [eventType, setEventType] = useState<EventType>("party");
@@ -209,7 +217,9 @@ export function HalfHourSlotPicker({
       <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
         <div>
           <p className="text-2xl font-bold">
-            {p.totalCents !== null ? zar(p.totalCents) : "…"}
+            {p.totalCents !== null && ready
+              ? show(p.totalCents, hostCurrency)
+              : "…"}
           </p>
           <p className="text-xs text-neutral-400">
             {p.minutes} min live show · no nudity, no porn

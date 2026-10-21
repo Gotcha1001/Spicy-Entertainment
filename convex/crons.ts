@@ -18,4 +18,7 @@ crons.interval(
   internal.bookings.sweep,
 );
 
+// Live FX for multi-currency display (base USD). Falls back to FALLBACK_RATES if this fails.
+crons.interval("refresh FX rates", { hours: 12 }, internal.fx.refresh);
+
 export default crons;

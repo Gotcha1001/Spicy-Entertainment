@@ -425,7 +425,7 @@ export function fromMinor(minor: number, currency: string): string {
 
 export type Limits = { min: number; max: number };
 
-function niceMinor(minor: number, currency: string): number {
+export function niceMinor(minor: number, currency: string): number {
   const digits = minorDigits(currency);
   const major = Number((minor / 10 ** digits).toPrecision(2)); // 2 significant digits
   return Math.max(1, Math.round(major * 10 ** digits));
@@ -460,4 +460,16 @@ export function withinLimits(minor: number, limits: Limits): boolean {
     minor >= Math.floor(limits.min * 0.85) &&
     minor <= Math.ceil(limits.max * 1.15)
   );
+}
+
+export function resolveCurrency(
+  user:
+    | { currency?: string | null; country?: string | null }
+    | null
+    | undefined,
+  rates: Rates = FALLBACK_RATES,
+): string {
+  const chosen = user?.currency?.trim().toUpperCase();
+  if (chosen && rates[chosen]) return chosen;
+  return currencyForCountry(user?.country, rates);
 }
