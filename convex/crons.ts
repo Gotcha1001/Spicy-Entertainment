@@ -18,6 +18,13 @@ crons.interval(
   internal.bookings.sweep,
 );
 
+// Failed no-show refunds get retried until Paystack accepts them.
+crons.interval(
+  "retry no-show refunds",
+  { minutes: 10 },
+  internal.payments.retryPendingRefunds,
+);
+
 // Live FX for multi-currency display (base USD). Falls back to FALLBACK_RATES if this fails.
 crons.interval("refresh FX rates", { hours: 12 }, internal.fx.refresh);
 

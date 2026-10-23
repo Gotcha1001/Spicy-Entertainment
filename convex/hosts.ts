@@ -46,6 +46,7 @@ export type DancerCard = {
   /** Average out of 10, or null until she has been rated. */
   rating: number | null;
   ratingCount: number;
+  likeCount: number;
 };
 
 export type DancerPublic = DancerCard & { bio: string };
@@ -79,6 +80,7 @@ function toCard(h: Doc<"hosts">): DancerCard {
     isOnline: h.isOnline,
     rating: averageRating(h),
     ratingCount: h.ratingCount,
+    likeCount: h.likeCount ?? 0,
   };
 }
 

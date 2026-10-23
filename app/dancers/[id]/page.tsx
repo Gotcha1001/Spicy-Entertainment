@@ -7,6 +7,7 @@ import { api } from "@/convex/_generated/api";
 
 import { OnlineBadge } from "@/components/dancers/OnlineBadge";
 import { RatingBadge } from "@/components/dancers/RatingBadge";
+import { LikeButton } from "@/components/dancers/LikeButton";
 import { HalfHourSlotPicker } from "@/components/booking/HalfHourSlotPicker";
 import { ActChips } from "@/components/dancers/ArtChips";
 import { useMoney } from "@/hooks/useMoney";
@@ -37,7 +38,15 @@ export default function Page() {
           <OnlineBadge isOnline={d.isOnline} className="bg-white/10" />
           <h1 className="text-3xl font-bold">{d.displayName}</h1>
           <p className="text-neutral-300">{d.tagline}</p>
-          <RatingBadge rating={d.rating} count={d.ratingCount} />
+          {/* Rating + likes side by side */}
+          <div className="flex flex-wrap items-center gap-3">
+            <RatingBadge rating={d.rating} count={d.ratingCount} />
+            <LikeButton
+              hostId={d._id}
+              count={d.likeCount}
+              className="bg-white/10 hover:bg-white/20"
+            />
+          </div>
           <ActChips acts={d.acts} />
           <p className="text-neutral-300">{d.bio}</p>
           <p className="font-semibold">

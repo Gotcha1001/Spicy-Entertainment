@@ -79,6 +79,7 @@ export default defineSchema({
     ratingSum: v.number(),
     ratingCount: v.number(),
     createdAt: v.number(),
+    likeCount: v.optional(v.number()),
   })
     .index("by_user", ["userId"])
     .index("by_status_online", ["status", "isOnline"]),
@@ -184,6 +185,14 @@ export default defineSchema({
   })
     .index("by_booking", ["bookingId"])
     .index("by_host", ["hostId"]),
+
+  likes: defineTable({
+    hostId: v.id("hosts"),
+    userId: v.id("users"),
+    createdAt: v.number(),
+  })
+    .index("by_host_user", ["hostId", "userId"])
+    .index("by_user", ["userId"]),
 
   // ───────────── SAFETY ─────────────
   blocks: defineTable({

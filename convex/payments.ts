@@ -1,17 +1,3 @@
-// convex/payments.ts
-//
-// Paystack split payments for dancer bookings.
-//
-//   party pays  ──►  Paystack  ──►  dancer's subaccount (her share, automatic)
-//                                └─►  platform account (platformFeeCents)
-//
-// No manual payouts: the dancer's own bank details live on her Paystack
-// subaccount (created in hostPayout.ts), so Paystack settles to her directly.
-//
-// Env (set with `npx convex env set NAME value`):
-//   PAYSTACK_SECRET   your Paystack secret key
-//   SITE_URL          e.g. https://yourapp.vercel.app (used for the redirect back)
-
 import {
   action,
   internalAction,
@@ -318,6 +304,22 @@ export const markRefunded = internalMutation({
           status: "ended",
           endedAt: Date.now(),
         });
+      }
+    }
+  },
+});
+
+/** Cron: re-attempt refunds for no-shows whose first refund didn't go through. */
+export const retryPendingRefunds = internalAction({
+  args: {},
+  handler: async (ctx): Promise<void> => {
+    const ids = await ctx.runQuery(internal.bookings.noShowsAwaitingRefund, {});
+    for (const bookingId of ids) {
+      try {
+        // No-op if the booking has no succeeded payment left to refund.
+        await ctx.runAction(internal.payments.refundForBooking, { bookingId });
+      } catch (e) {
+        console.error("[payments] refund retry failed", { bookingId, e });
       }
     }
   },
