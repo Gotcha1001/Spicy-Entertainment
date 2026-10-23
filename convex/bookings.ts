@@ -1,9 +1,3 @@
-// convex/bookings.ts
-//
-// Book a dancer for 1–4 half-hour blocks. The server decides everything that
-// matters (price, availability, clashes); the browser only picks a start time
-// and a number of blocks.
-
 import {
   internalMutation,
   internalQuery,
@@ -555,5 +549,20 @@ export const listMine = query({
       : [];
 
     return { asGuest, asHost, isHost: myHost !== null };
+  },
+});
+
+/** No-show bookings from the last 7 days that haven't been flipped to "refunded" yet. */
+export const noShowsAwaitingRefund = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<Id<"bookings">[]> => {
+    const since = Date.now() - 7 * 24 * 60 * MIN_MS;
+    const rows = await ctx.db
+      .query("bookings")
+      .withIndex("by_status_start", (q) =>
+        q.eq("status", "no_show").gt("startsAt", since),
+      )
+      .take(50);
+    return rows.map((b) => b._id);
   },
 });

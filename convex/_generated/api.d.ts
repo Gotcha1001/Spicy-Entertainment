@@ -32,6 +32,7 @@ import type * as lib_showWindow from "../lib/showWindow.js";
 import type * as lib_slots from "../lib/slots.js";
 import type * as lib_timezones from "../lib/timezones.js";
 import type * as lib_validators from "../lib/validators.js";
+import type * as likes from "../likes.js";
 import type * as notifications from "../notifications.js";
 import type * as payments from "../payments.js";
 import type * as payouts from "../payouts.js";
@@ -72,6 +73,7 @@ declare const fullApi: ApiFromModules<{
   "lib/slots": typeof lib_slots;
   "lib/timezones": typeof lib_timezones;
   "lib/validators": typeof lib_validators;
+  likes: typeof likes;
   notifications: typeof notifications;
   payments: typeof payments;
   payouts: typeof payouts;
