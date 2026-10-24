@@ -15,6 +15,7 @@ import type * as calendar from "../calendar.js";
 import type * as callAccess from "../callAccess.js";
 import type * as calls from "../calls.js";
 import type * as crons from "../crons.js";
+import type * as dancerAvailability from "../dancerAvailability.js";
 import type * as fx from "../fx.js";
 import type * as hostPayout from "../hostPayout.js";
 import type * as hosts from "../hosts.js";
@@ -56,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   callAccess: typeof callAccess;
   calls: typeof calls;
   crons: typeof crons;
+  dancerAvailability: typeof dancerAvailability;
   fx: typeof fx;
   hostPayout: typeof hostPayout;
   hosts: typeof hosts;
